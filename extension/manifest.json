@@ -1,0 +1,77 @@
+{
+  "manifest_version": 3,
+  "name": "Refbox",
+  "version": "0.4.0",
+  "description": "Catches images you save on Awwwards, Pinterest, Dribbble and Instagram and sorts them into tags and design elements.",
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Open Refbox",
+    "default_icon": {
+      "16": "icons/16.png",
+      "32": "icons/32.png",
+      "48": "icons/48.png"
+    }
+  },
+  "icons": {
+    "16": "icons/16.png",
+    "32": "icons/32.png",
+    "48": "icons/48.png",
+    "128": "icons/128.png"
+  },
+  "permissions": [
+    "downloads",
+    "contextMenus",
+    "storage",
+    "unlimitedStorage",
+    "notifications",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "https://*.awwwards.com/*",
+    "https://*.pinterest.com/*",
+    "https://*.pinimg.com/*",
+    "https://*.dribbble.com/*",
+    "https://*.instagram.com/*",
+    "https://*.cdninstagram.com/*",
+    "https://*.fbcdn.net/*"
+  ],
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAzLxWQ/6CkjIgSvY2AHqYE0WZLn/ebbyRRfsAvNdFZhCpyGW6MRgCS8J7LWpGfC5yBIIlreCAJhimwnwClD3au+zmyIH4hBHWzhXOLI8N3rcDURWDd9ftPShS2UabThurj6xK8wKVkF1KSV7ndaxYD4Urf6ja4jEGzXLs+WZtqvEImCstQRBbXCga8buh1txJ+eqdaouIPUq8TuPA2/+sA6+jFC6IH/Rda7hjagBch0qsDCU5nHZx2FjUE/2IAlAnDuqnaox1ePwNGkqytQB9pe1jvNJSCrQKG5qOtwCXq9+W+JqNMikFkiBh3EyKHd0vloW3znMgSHJyUl2t9W7WCwIDAQAB",
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.awwwards.com/*",
+        "https://*.pinterest.com/*",
+        "https://*.dribbble.com/*",
+        "https://*.instagram.com/*"
+      ],
+      "js": [
+        "main.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "https://*.awwwards.com/*",
+        "https://*.pinterest.com/*",
+        "https://*.dribbble.com/*",
+        "https://*.instagram.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "commands": {
+    "screenshot": {
+      "suggested_key": {
+        "default": "Alt+Shift+S",
+        "mac": "Alt+Shift+S"
+      },
+      "description": "Save a screenshot of this page to Refbox"
+    }
+  }
+}
