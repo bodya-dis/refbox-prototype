@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Refbox",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Catches images you save on Awwwards, Pinterest, Dribbble and Instagram and sorts them into tags and design elements.",
   "background": {
     "service_worker": "background.js"
@@ -25,7 +25,8 @@
     "contextMenus",
     "storage",
     "unlimitedStorage",
-    "notifications"
+    "notifications",
+    "activeTab"
   ],
   "host_permissions": [
     "https://*.awwwards.com/*",
@@ -63,5 +64,14 @@
       ],
       "run_at": "document_idle"
     }
-  ]
+  ],
+  "commands": {
+    "screenshot": {
+      "suggested_key": {
+        "default": "Alt+Shift+S",
+        "mac": "Alt+Shift+S"
+      },
+      "description": "Save a screenshot of this page to Refbox"
+    }
+  }
 }

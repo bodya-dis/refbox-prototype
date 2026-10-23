@@ -659,7 +659,7 @@ function renderImage() {
     ${i.status === 'failed' ? '<div class="note warn">Processing failed: tags and elements are missing. The image itself is saved.</div><button class="btn primary wide" data-act="reprocess">Try again</button>' : ''}
     ${i.status === 'processing' ? '<div class="note"><span class="spin" style="display:inline-block;vertical-align:-1px;margin-right:6px;border-color:var(--line);border-top-color:var(--acc)"></span>Tagging and detecting elements…</div>' : ''}
     <dl class="ess"><div><dt>Saved</dt><dd>${new Date(i.savedAt).toLocaleString([], {dateStyle: 'medium', timeStyle: 'short'})}</dd></div>
-      <div><dt>Source</dt><dd>${i.page ? `<a href="${esc(i.page)}" target="_blank" rel="noopener">${esc(i.site)} ↗</a>` : i.demo ? 'Imported file' : `<a href="https://${esc(i.site)}" target="_blank" rel="noopener">${esc(i.site)} ↗</a>`}</dd></div></dl>
+      <div><dt>Source</dt><dd>${i.caseUrl ? `<a href="${esc(i.caseUrl)}" target="_blank" rel="noopener">Awwwards case ↗</a><br><a href="${esc(i.page)}" target="_blank" rel="noopener">${esc(i.page.replace(/^https?:\/\/(www\.)?/, '').split('/')[0])} ↗</a>` : i.page ? `<a href="${esc(i.page)}" target="_blank" rel="noopener">${esc(i.site)} ↗</a>` : i.demo ? 'Imported file' : `<a href="https://${esc(i.site)}" target="_blank" rel="noopener">${esc(i.site)} ↗</a>`}</dd></div></dl>
     <details class="more" id="more" ${S.moreOpen ? 'open' : ''}><summary>More <span>${i.tags.length} ${i.tags.length === 1 ? 'tag' : 'tags'} · ${els.length} elements</span></summary><div class="more-in">
     <section class="sec"><h2>Tags</h2>
       <div class="tags">${i.tags.map(t => `<span class="tag"><button data-act="folder" data-k="tag" data-v="${esc(t)}" title="Open folder">${esc(t)}</button><button class="x" data-act="rm-tag" data-v="${esc(t)}" aria-label="Remove tag ${esc(t)}">×</button></span>`).join('') || '<span style="color:var(--mute);font-size:12.5px">No confident tags. Add one below.</span>'}</div>
@@ -769,7 +769,7 @@ function addBlob(blob, meta) {
       const sc = Math.min(1, 1400 / im.naturalWidth), w = Math.round(im.naturalWidth * sc), h = Math.round(im.naturalHeight * sc);
       const c = document.createElement('canvas'); c.width = w; c.height = h; c.getContext('2d').drawImage(im, 0, 0, w, h);
       const ratio = h / w, mobile = ratio >= 1.9 && ratio <= 2.4;   /* phone screen proportions, e.g. 1179×2556 */
-      const img = {id: uid('img'), name: meta.name, site: meta.site || 'imported file', page: meta.page, capId: meta.capId, autoTags: mobile ? ['mobile design'] : [], tags: loadTags(meta.capId), canvas: c, src: c.toDataURL('image/jpeg', .9), w, h, demo: true,
+      const img = {id: uid('img'), name: meta.name, site: meta.site || 'imported file', page: meta.page, caseUrl: meta.caseUrl, capId: meta.capId, autoTags: mobile ? ['mobile design'] : [], tags: loadTags(meta.capId), canvas: c, src: c.toDataURL('image/jpeg', .9), w, h, demo: true,
         boxes: [detectBand(c, 'top'), detectBand(c, 'bottom')].filter(Boolean), removed: new Set(), savedAt: meta.savedAt || Date.now(), status: 'received'};
       S.images.push(img); loadNotes(img); process(img, meta.quiet);
     };
@@ -791,7 +791,7 @@ async function idbAll() { const d = await idb(); return new Promise((res, rej) =
 async function idbDel(id) { const d = await idb(); d.transaction('captures', 'readwrite').objectStore('captures').delete(id); }
 async function loadCaptures(quiet) {
   const known = new Set(S.images.map(i => i.capId));
-  for (const r of (await idbAll()).sort((a, b) => a.savedAt - b.savedAt)) if (!known.has(r.id)) addBlob(r.blob, {name: r.name, site: r.site, page: r.page, capId: r.id, savedAt: r.savedAt, quiet});
+  for (const r of (await idbAll()).sort((a, b) => a.savedAt - b.savedAt)) if (!known.has(r.id)) addBlob(r.blob, {name: r.name, site: r.site, page: r.page, caseUrl: r.caseUrl, capId: r.id, savedAt: r.savedAt, quiet});
 }
 const ACT = {
   back: goBack, fwd: goFwd,

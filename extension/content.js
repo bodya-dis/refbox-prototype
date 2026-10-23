@@ -64,6 +64,18 @@
     if (e.source === window && e.data && typeof e.data.refboxCopiedLink === 'string') offerLink(e.data.refboxCopiedLink);
   });
 
+  // On Awwwards: remember which site you open, so its screenshots count as Awwwards screenshots
+  if (/(^|\.)awwwards\.com$/.test(location.hostname)) {
+    document.addEventListener('click', e => {
+      const a = e.target.closest('a[href]');
+      if (!a) return;
+      try {
+        const h = new URL(a.href, location.href).hostname.replace(/^www\./, '');
+        if (h && !/awwwards\.com$/.test(h)) chrome.runtime.sendMessage({type: 'aww-click', host: h, case: location.href});
+      } catch (err) {}
+    }, true);
+  }
+
   document.addEventListener('click', e => {
     const b = saveButton(e.target);
     if (!b) return;

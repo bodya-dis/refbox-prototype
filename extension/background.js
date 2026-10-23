@@ -43,17 +43,49 @@ async function fetchImage(url) {
   }
   throw new Error('Could not download the image');
 }
-async function capture(url, page, title) {
-  const blob = await fetchImage(url);
+async function store(blob, rec, heading) {
   const id = 'c' + Date.now() + Math.random().toString(36).slice(2, 6);
-  await put({id, blob, url, page: page || '', site: siteOf(page, url), name: title || nameFrom(url), savedAt: Date.now()});
+  await put({id, blob, savedAt: Date.now(), ...rec});
   await chrome.storage.local.set({lastCapture: id});
   const {unseen = 0} = await chrome.storage.session.get('unseen');
   await chrome.storage.session.set({unseen: unseen + 1});
-  chrome.action.setBadgeBackgroundColor({color: '#D4386C'});
+  chrome.action.setBadgeBackgroundColor({color: '#B84A6C'});
   chrome.action.setBadgeText({text: String(unseen + 1)});
-  chrome.notifications.create(id, {type: 'basic', iconUrl: 'icons/128.png', title: 'Saved to Refbox', message: `From ${siteOf(page, url)}`, priority: 0});
+  chrome.notifications.create(id, {type: 'basic', iconUrl: 'icons/128.png', title: heading || 'Saved to Refbox', message: `From ${rec.site}`, priority: 0});
 }
+async function capture(url, page, title) {
+  const blob = await fetchImage(url);
+  await store(blob, {url, page: page || '', site: siteOf(page, url), name: title || nameFrom(url)});
+}
+
+// ---- screenshots: Option+Shift+S or right-click → Save screenshot to Refbox ----
+// Sites opened from Awwwards remember the Awwwards case they came from.
+async function awwardsCase(url) {
+  const {awwContext = {}} = await chrome.storage.session.get('awwContext');
+  const c = awwContext[host(url).replace(/^www\./, '')];
+  return c && Date.now() - c.at < 60 * 60e3 ? c.case : '';
+}
+async function screenshot(tab) {
+  if (!tab || !/^https?:/.test(tab.url || '')) {
+    return chrome.notifications.create({type: 'basic', iconUrl: 'icons/128.png', title: 'Refbox', message: 'Screenshots work on regular web pages only.'});
+  }
+  try {
+    const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, {format: 'png'});
+    const blob = await (await fetch(dataUrl)).blob();
+    const caseUrl = await awwardsCase(tab.url);
+    const site = caseUrl ? 'awwwards.com' : SOURCE_HOSTS.test(host(tab.url)) ? siteOf(tab.url) : host(tab.url).replace(/^www\./, '');
+    await store(blob, {url: '', page: tab.url, site, caseUrl, name: tab.title || host(tab.url), kind: 'screenshot'}, caseUrl ? 'Awwwards screenshot saved' : 'Screenshot saved to Refbox');
+  } catch (e) {
+    chrome.notifications.create({type: 'basic', iconUrl: 'icons/128.png', title: 'Refbox could not take the screenshot', message: 'Click the page once, then press Option+Shift+S again.'});
+  }
+}
+chrome.commands.onCommand.addListener((cmd, tab) => { if (cmd === 'screenshot') screenshot(tab); });
+chrome.runtime.onMessage.addListener(async msg => {
+  if (!msg || msg.type !== 'aww-click') return;
+  const {awwContext = {}} = await chrome.storage.session.get('awwContext');
+  awwContext[msg.host] = {case: msg.case, at: Date.now()};
+  await chrome.storage.session.set({awwContext});
+});
 const enabled = async () => (await chrome.storage.local.get('enabled')).enabled !== false;
 
 // Save image as… / download buttons on source sites
@@ -101,6 +133,7 @@ async function saveLink(url, title, folder) {
 async function buildMenus() {
   await chrome.contextMenus.removeAll();
   chrome.contextMenus.create({id: 'save-image', title: 'Save to Refbox', contexts: ['image']});
+  chrome.contextMenus.create({id: 'screenshot', title: 'Save screenshot to Refbox  (⌥⇧S)', contexts: ['page']});
   chrome.contextMenus.create({id: 'link-root', title: 'Save link to Refbox', contexts: ['link', 'page']});
   for (const f of await folders()) chrome.contextMenus.create({id: 'folder:' + f, parentId: 'link-root', title: f, contexts: ['link', 'page']});
   chrome.contextMenus.create({id: 'sep', parentId: 'link-root', type: 'separator', contexts: ['link', 'page']});
@@ -115,6 +148,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     if (!/^https?:/.test(info.srcUrl || '')) return chrome.notifications.create({type: 'basic', iconUrl: 'icons/128.png', title: 'Refbox', message: 'This image cannot be saved from here. Try opening it in its own tab first.'});
     capture(info.srcUrl, info.pageUrl, tab && tab.title).catch(() => chrome.notifications.create({type: 'basic', iconUrl: 'icons/128.png', title: 'Refbox could not save this image', message: 'The site did not allow the download.'}));
   }
+  if (info.menuItemId === 'screenshot') return screenshot(tab);
   const id = String(info.menuItemId);
   if (id.startsWith('folder:')) {
     const url = info.linkUrl || info.pageUrl;
