@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Refbox",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "Catches images, GIFs and videos you save on Awwwards, Pinterest, Dribbble and Instagram and sorts them into tags and design elements.",
   "background": {
     "service_worker": "background.js"
