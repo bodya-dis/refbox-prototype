@@ -659,7 +659,7 @@ function renderImage() {
     : `<div class="note">${i.status === 'ready' ? 'No elements found on this image.' : i.status === 'failed' ? 'Elements were not detected because processing failed.' : 'Detecting elements…'}</div>`;
   const folders = [{k: 'recent'}, ...i.tags.map(t => ({k: 'tag', v: t}))];
   return `<div class="detail"><div class="col">
-    <div class="bar"><button class="btn" id="peek-btn" data-act="outlines" aria-pressed="${S.outlines}" ${els.length ? '' : 'disabled'}>◧ ${S.outlines ? 'Hide elements' : 'Show elements'}</button>${hl ? '<button class="btn" data-act="clear-hl">Clear highlight</button>' : ''}<button class="btn" data-act="copy" title="Copy image (⌘C)">⧉ Copy for Figma</button><span class="seg" role="group" aria-label="Zoom"><button data-act="zoom" data-v="fit" aria-pressed="${S.zoom !== 'actual'}">Fit width</button><button data-act="zoom" data-v="actual" aria-pressed="${S.zoom === 'actual'}">100%</button></span><span class="hint">${els.length ? (S.outlines ? 'Click an outline to open that element.' : 'Hover to preview the breakdown, click to keep it on.') : ''}</span></div>
+    <div class="bar"><button class="btn" id="peek-btn" data-act="outlines" aria-pressed="${S.outlines}" ${els.length ? '' : 'disabled'}>◧ ${S.outlines ? 'Hide elements' : 'Show elements'}</button>${hl ? '<button class="btn" data-act="clear-hl">Clear highlight</button>' : ''}<button class="btn" data-act="copy" title="Copy image (⌘C)">⧉ Copy for Figma</button><button class="btn" data-act="copy-claude" title="Copy the picture and its card for Claude (⇧⌘C)">✳ Copy for Claude</button><span class="seg" role="group" aria-label="Zoom"><button data-act="zoom" data-v="fit" aria-pressed="${S.zoom !== 'actual'}">Fit width</button><button data-act="zoom" data-v="actual" aria-pressed="${S.zoom === 'actual'}">100%</button></span><span class="hint">${els.length ? (S.outlines ? 'Click an outline to open that element.' : 'Hover to preview the breakdown, click to keep it on.') : ''}</span></div>
     <div class="stage ${hl ? 'hl' : ''} ${S.outlines ? '' : 'off'}" id="stage" tabindex="0" aria-label="${esc(i.name)}, scrollable"><div class="canvas" style="width:${S.zoom === 'actual' ? i.w + 'px' : '100%'}">${i.video ? `<video src="${i.video}" controls loop muted autoplay playsinline style="width:100%;display:block"></video>` : `<img src="${i.gif || i.src}" alt="${esc(i.name)}">`}${boxes}</div></div>
     <section class="sec"><h2>Elements (${els.length})</h2><div class="strip">${strip}</div></section>
   </div>
@@ -715,6 +715,7 @@ function renderElement() {
       <span style="font-weight:500">${esc(p.name)} <span style="color:var(--mute);font-weight:400;font-family:var(--f-mono);font-size:12px">· ${esc(p.site)}</span></span>
       <button class="btn primary wide" data-act="open-parent" data-id="${e.id}">↗ Open full design</button>
       <button class="btn wide" data-act="copy" title="Copy element (⌘C)">⧉ Copy for Figma</button>
+      <button class="btn wide" data-act="copy-claude" title="Copy the element and its card for Claude (⇧⌘C)">✳ Copy for Claude</button>
     </section>
     <section class="sec"><h2>Element type</h2><select id="type-select" data-act="set-type" aria-label="Element type">${Object.entries(TYPES).map(([k, v]) => `<option value="${k}" ${k === e.type ? 'selected' : ''}>${v.label}</option>`).join('')}</select></section>
     <section class="sec"><h2>Actions</h2><div class="bar"><button class="btn danger" data-act="del-el">Delete element</button></div></section>
@@ -747,6 +748,32 @@ function confirmBox(title, text, ok, fn) {
 /* ---------- Actions ---------- */
 /* Copy the open image or element as PNG, ready for ⌘V in Figma */
 function pngFromDataURL(u) { const b = atob(u.split(',')[1]), a = new Uint8Array(b.length); for (let k = 0; k < b.length; k++) a[k] = b.charCodeAt(k); return new Blob([a], {type: 'image/png'}); }
+/* "Copy for Claude": the picture plus a short text card in one clipboard item */
+function refCard() {
+  const v = S.nav.view, e = v === 'element' ? curEl() : null, i = e ? S.images.find(x => x.id === e.parent) : curImg();
+  const day = new Date(i.savedAt).toISOString().slice(0, 10);
+  const kind = e ? 'element' : i.video ? 'video' : i.gif ? 'gif' : 'image';
+  const lines = [`[Refbox] ${kind} · ${e ? TYPES[e.type].label + ' from ' + i.name : i.name}`, `id: rb:${e ? e.id : (i.capId || i.id)}`];
+  if (i.page) lines.push(`source: ${i.page}`);
+  if (i.caseUrl) lines.push(`awwwards case: ${i.caseUrl}`);
+  lines.push(`site: ${i.site} · saved ${day}`);
+  if (i.tags.length) lines.push(`tags: ${i.tags.join(', ')}`);
+  if (e) lines.push(`element: ${TYPES[e.type].label.toLowerCase()} · ${Math.round(e.box.w)}×${Math.round(e.box.h)} px at x ${Math.round(e.box.x)}, y ${Math.round(e.box.y)} of ${i.w}×${i.h}${e.box.note ? ' · ' + e.box.note : ''}`);
+  else if (elsOf(i.id).length) lines.push(`elements: ${elsOf(i.id).map(x => TYPES[x.type].label.toLowerCase()).join(', ')}`);
+  for (const n of (i.notes || []).slice(-3)) lines.push(`note: ${[n.liked.join(', '), n.text].filter(Boolean).join(' — ')}`);
+  if (i.video) lines.push('(the picture is the first frame of the video)');
+  return lines.join('\n');
+}
+function copyForClaude() {
+  const v = S.nav.view; if (v === 'grid') return;
+  const text = refCard();
+  const png = v === 'image' ? new Promise(res => curImg().canvas.toBlob(res, 'image/png')) : Promise.resolve(pngFromDataURL(curEl().src));
+  try {
+    navigator.clipboard.write([new ClipboardItem({'image/png': png, 'text/plain': new Blob([text], {type: 'text/plain'})})])
+      .then(() => toast('Copied the picture and its card. Paste into Claude with ⌘V.', 'Text only', () => navigator.clipboard.writeText(text).then(() => toast('Copied the card as text.'))))
+      .catch(() => navigator.clipboard.writeText(text).then(() => toast('Copied the card as text. Drag the picture in separately.')).catch(() => toast('This preview blocks copying. In the Refbox extension it works.')));
+  } catch (err) { toast('This preview blocks copying. In the Refbox extension it works.'); }
+}
 function copyCurrent() {
   const v = S.nav.view; if (v === 'grid') return;
   const blob = v === 'image' ? new Promise(res => curImg().canvas.toBlob(res, 'image/png')) : Promise.resolve(pngFromDataURL(curEl().src));
@@ -854,6 +881,7 @@ const ACT = {
   theme: () => setTheme(S.theme === 'light' ? 'dark' : 'light'),
   zoom: el => { S.zoom = el.dataset.v; render(); },
   copy: () => copyCurrent(),
+  'copy-claude': () => copyForClaude(),
   'details-all': () => { S.details = !S.details; S.open.clear(); render(); },
   like: el => { const d = S.draft, v = el.dataset.v; d.liked.has(v) ? d.liked.delete(v) : d.liked.add(v); el.setAttribute('aria-pressed', d.liked.has(v)); },
   'rm-note': el => { const i = curImg(); i.notes = (i.notes || []).filter(n => n.id !== el.dataset.id); saveNotes(i); render(); toast('Note deleted'); },
@@ -960,7 +988,7 @@ document.addEventListener('keydown', e => {
   if (tr && (e.key === 'Backspace' || e.key === 'Delete') && tr.querySelector('.del')) { e.preventDefault(); return deleteTag(tr.dataset.tag); }
   const typing = /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
   if (typing) { if (e.key === 'Escape') document.activeElement.blur(); return; }
-  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'c' && S.nav.view !== 'grid' && !String(getSelection())) { e.preventDefault(); return copyCurrent(); }
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'c' && S.nav.view !== 'grid' && !String(getSelection())) { e.preventDefault(); return e.shiftKey ? copyForClaude() : copyCurrent(); }
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   const v = S.nav.view;
   if (e.key === '/') { e.preventDefault(); $('q').focus(); }
