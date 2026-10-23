@@ -21,6 +21,14 @@ function nameFrom(url, fallback) {
   catch (e) { return fallback || 'image'; }
 }
 
+// ---- activity log: the last 20 events, shown at the bottom of the Refbox sidebar ----
+async function log(ok, site, text) {
+  const {activity = []} = await chrome.storage.local.get('activity');
+  activity.unshift({at: Date.now(), ok, site, text});
+  await chrome.storage.local.set({activity: activity.slice(0, 20)});
+}
+chrome.runtime.onMessage.addListener(msg => { if (msg && msg.type === 'log') log(msg.ok, msg.site, msg.text); });
+
 // ---- storage (IndexedDB, shared with the Refbox page of this extension) ----
 function db() {
   return new Promise((res, rej) => {
@@ -52,6 +60,7 @@ async function store(blob, rec, heading) {
   chrome.action.setBadgeBackgroundColor({color: '#B84A6C'});
   chrome.action.setBadgeText({text: String(unseen + 1)});
   chrome.notifications.create(id, {type: 'basic', iconUrl: 'icons/128.png', title: heading || 'Saved to Refbox', message: `From ${rec.site}`, priority: 0});
+  log(true, rec.site, rec.kind === 'screenshot' ? 'Screenshot saved' : 'Image saved');
 }
 async function capture(url, page, title) {
   const blob = await fetchImage(url);
@@ -107,7 +116,7 @@ async function screenshot(tab) {
   }
   let area;
   try { const [res] = await chrome.scripting.executeScript({target: {tabId: tab.id}, func: selectArea}); area = res && res.result; if (area === null) return; }
-  catch (e) { area = undefined; }   // pages that refuse the crosshair: take the whole screen
+  catch (e) { area = undefined; log(false, host(tab.url), 'Could not show the crosshair here, saved the whole screen: ' + e.message); }
   try {
     const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, {format: 'png'});
     let blob = await (await fetch(dataUrl)).blob();
@@ -116,6 +125,7 @@ async function screenshot(tab) {
     const site = caseUrl ? 'awwwards.com' : SOURCE_HOSTS.test(host(tab.url)) ? siteOf(tab.url) : host(tab.url).replace(/^www\./, '');
     await store(blob, {url: '', page: tab.url, site, caseUrl, name: tab.title || host(tab.url), kind: 'screenshot'}, caseUrl ? 'Awwwards screenshot saved' : 'Screenshot saved to Refbox');
   } catch (e) {
+    log(false, host(tab.url), 'Screenshot failed: ' + e.message);
     chrome.notifications.create({type: 'basic', iconUrl: 'icons/128.png', title: 'Refbox could not take the screenshot', message: 'Click the page once, then press Option+Shift+S again.'});
   }
 }
@@ -154,7 +164,7 @@ chrome.runtime.onMessage.addListener(msg => {
     if (now - (recent.get(msg.url) || 0) < 15000) return;
     recent.set(msg.url, now);
     try { await capture(msg.url, msg.page, msg.title); }
-    catch (e) { chrome.notifications.create({type: 'basic', iconUrl: 'icons/128.png', title: 'Refbox could not save this image', message: 'Try right-click → Save to Refbox.'}); }
+    catch (e) { log(false, siteOf(msg.page, msg.url), 'Could not download the image: ' + e.message); chrome.notifications.create({type: 'basic', iconUrl: 'icons/128.png', title: 'Refbox could not save this image', message: 'Try right-click → Save to Refbox.'}); }
   })();
 });
 
