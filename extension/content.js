@@ -6,10 +6,17 @@
   const label = b => (b.getAttribute('aria-label') || b.title || (b.innerText || '').split('\n')[0] || '').trim()
     || ((b.querySelector('svg[aria-label]') || {}).getAttribute?.('aria-label') || '').trim();
 
+  // Walk up from what was clicked: the Save button is often a plain div inside the pin's link,
+  // so check each level's own label instead of stopping at the first button or link.
   function saveButton(target) {
-    const b = target.closest('button, [role="button"], a');
-    if (!b) return null;
-    return SAVE.test(label(b)) || TEST_ID.test(b.getAttribute('data-test-id') || '') ? b : null;
+    let el = target instanceof Element ? target : target.parentElement;
+    for (let i = 0; el && i < 6; i++, el = el.parentElement) {
+      const own = (el.getAttribute('aria-label') || el.title || '').trim();
+      const text = (el.innerText || '').trim();
+      if (SAVE.test(own) || (text.length <= 30 && SAVE.test(text)) || TEST_ID.test(el.getAttribute('data-test-id') || '')) return el;
+      if (el.matches('button, [role="button"]') && SAVE.test(label(el))) return el;
+    }
+    return null;
   }
 
   const area = im => { const r = im.getBoundingClientRect(); return r.width * r.height; };
@@ -80,9 +87,9 @@
     const b = saveButton(e.target);
     if (!b) return;
     const im = imageFor(b);
-    if (!im) return;
+    if (!im) return chrome.runtime.sendMessage({type: 'log', ok: false, site: location.hostname, text: 'Save pressed, but no image was found next to it'});
     const url = bestSrc(im);
-    if (!/^https?:/.test(url)) return;
+    if (!/^https?:/.test(url)) return chrome.runtime.sendMessage({type: 'log', ok: false, site: location.hostname, text: 'This image cannot be downloaded directly (it is not a regular web address)'});
     chrome.runtime.sendMessage({type: 'capture', url, page: location.href, title: document.title});
   }, true);
 })();

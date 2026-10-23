@@ -41,6 +41,9 @@ body[data-ui="light"] .nav[aria-current="true"]{background:#FADBE1}
 .tagrow:hover .n{visibility:hidden}
 .tagrow .del:hover{color:var(--bad); background:var(--line)}
 @media (hover:none){.tagrow .del{opacity:1; position:static; transform:none}}
+.status{margin-top:auto; display:flex; flex-direction:column; gap:4px; padding:10px; border-radius:8px; background:var(--surf); border:1px solid var(--line); font-size:12px; color:var(--mute)}
+.status .ok{color:var(--t-button)} .status .bad{color:var(--bad)}
+.status + .keys{margin-top:0}
 .ghead{display:flex; align-items:center; justify-content:space-between; padding-right:6px}
 .plus{width:22px; height:22px; border-radius:6px; border:1px solid var(--line); background:var(--surf2); color:var(--ink); display:grid; place-items:center; padding:0; font:500 15px/1 var(--f-ui)}
 .plus:hover,.plus[aria-expanded="true"]{border-color:var(--acc); color:var(--acc)}

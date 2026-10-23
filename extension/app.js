@@ -289,6 +289,10 @@ function renderSide() {
     ${tags.map(([t, n]) => `<div class="tagrow" data-tag="${esc(t)}">${navBtn({k: 'tag', v: t}, `<span class="ico">${PINNED.includes(t) ? '▯' : '#'}</span><span class="lbl">${esc(t)}</span>`, n)}${PINNED.includes(t) ? '' : `<button class="del" data-act="del-tag" data-v="${esc(t)}" aria-label="Delete tag ${esc(t)}" title="Delete tag">×</button>`}</div>`).join('')}</div>`;
   h += `<div class="group">${navBtn({k: 'links'}, '<span class="ico">↗</span><span class="lbl">Links</span>', S.links.length)}</div>`;
   if (failed) h += `<div class="group">${navBtn({k: 'attention'}, '<span class="ico">!</span><span class="lbl">Needs attention</span>', failed, 'attn')}</div>`;
+  if (EXT) {
+    const last = (S.activity || [])[0];
+    h += `<div class="status" role="status"><span>Refbox ${esc(chrome.runtime.getManifest().version)} · <kbd>⌥⇧S</kbd> screenshot</span>${last ? `<span class="${last.ok ? 'ok' : 'bad'}">${last.ok ? '✓' : '✕'} ${esc(last.text)} · ${esc(last.site || '')} · ${rel(last.at)}</span>` : '<span>Nothing saved yet. Press Save on Pinterest to try.</span>'}</div>`;
+  }
   h += `<div class="keys"><kbd>/</kbd><span>Search</span><kbd>Esc</kbd><span>Back</span><kbd>E</kbd><span>Toggle outlines</span><kbd>P</kbd><span>Open full design</span><kbd>← →</kbd><span>Next image</span></div>`;
   $('side').innerHTML = h;
 }
@@ -667,6 +671,7 @@ if (EXT) {
   S.links = [];
   if (location.hash === '#links') S.nav = {view: 'grid', folder: {k: 'links'}};
   chrome.storage.session.get('pendingLink', v => { if (v.pendingLink) { S.pendingLink = v.pendingLink; chrome.storage.session.remove('pendingLink'); S.nav = {view: 'grid', folder: {k: 'links'}}; render(); setTimeout(() => $('folder-name') && $('folder-name').focus(), 50); } });
+  chrome.storage.local.get('activity', v => { S.activity = v.activity || []; render(); });
   chrome.storage.local.get(['enabled', 'links', 'linkFolders'], v => {
     if (Array.isArray(v.linkFolders) && v.linkFolders.length) S.linkFolders = v.linkFolders;
     S.capture = v.enabled !== false; $('capture').setAttribute('aria-pressed', S.capture); $('capLbl').textContent = S.capture ? 'Capture on' : 'Capture off';
@@ -674,6 +679,7 @@ if (EXT) {
   });
   chrome.storage.onChanged.addListener(ch => {
     if (ch.lastCapture) loadCaptures(false);
+    if (ch.activity) { S.activity = ch.activity.newValue || []; renderSide(); }
     if (ch.links && JSON.stringify(ch.links.newValue) !== JSON.stringify(S.links)) { S.links = ch.links.newValue || []; render(); }
     if (ch.linkFolders && JSON.stringify(ch.linkFolders.newValue) !== JSON.stringify(S.linkFolders)) { S.linkFolders = ch.linkFolders.newValue || ['Favorites']; render(); }
   });
