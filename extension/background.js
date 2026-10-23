@@ -72,30 +72,68 @@ chrome.downloads.onCreated.addListener(async item => {
   }
 });
 
-// Right-click menus
-chrome.runtime.onInstalled.addListener(() => {
-  chrome.contextMenus.create({id: 'save-image', title: 'Save to Refbox', contexts: ['image']});
-  chrome.contextMenus.create({id: 'save-link', title: 'Add this page to Refbox links', contexts: ['page']});
+// The site's own Save / Collect buttons (from content.js)
+const recent = new Map();   // url -> time, so a double click saves once
+chrome.runtime.onMessage.addListener(msg => {
+  if (!msg || msg.type !== 'capture') return;
+  (async () => {
+    if (!(await enabled())) return;
+    const now = Date.now();
+    if (now - (recent.get(msg.url) || 0) < 15000) return;
+    recent.set(msg.url, now);
+    try { await capture(msg.url, msg.page, msg.title); }
+    catch (e) { chrome.notifications.create({type: 'basic', iconUrl: 'icons/128.png', title: 'Refbox could not save this image', message: 'Try right-click → Save to Refbox.'}); }
+  })();
 });
+
+// ---- links and link folders ----
+async function folders() { const {linkFolders} = await chrome.storage.local.get('linkFolders'); return Array.isArray(linkFolders) && linkFolders.length ? linkFolders : ['Favorites']; }
+async function saveLink(url, title, folder) {
+  const {links = []} = await chrome.storage.local.get('links');
+  const old = links.find(l => l.url === url);
+  if (old) old.folder = folder;
+  else links.unshift({id: 'l' + Date.now(), name: (title || host(url)).slice(0, 120), url, folder, from: siteOf(url)});
+  await chrome.storage.local.set({links});
+  chrome.notifications.create({type: 'basic', iconUrl: 'icons/128.png', title: `Saved to ${folder}`, message: title || url});
+}
+
+// Right-click menus: "Save to Refbox" on images, "Save link to Refbox ▸ folder" on links and pages
+async function buildMenus() {
+  await chrome.contextMenus.removeAll();
+  chrome.contextMenus.create({id: 'save-image', title: 'Save to Refbox', contexts: ['image']});
+  chrome.contextMenus.create({id: 'link-root', title: 'Save link to Refbox', contexts: ['link', 'page']});
+  for (const f of await folders()) chrome.contextMenus.create({id: 'folder:' + f, parentId: 'link-root', title: f, contexts: ['link', 'page']});
+  chrome.contextMenus.create({id: 'sep', parentId: 'link-root', type: 'separator', contexts: ['link', 'page']});
+  chrome.contextMenus.create({id: 'new-folder', parentId: 'link-root', title: 'New folder…', contexts: ['link', 'page']});
+}
+chrome.runtime.onInstalled.addListener(buildMenus);
+chrome.runtime.onStartup.addListener(buildMenus);
+chrome.storage.onChanged.addListener(ch => { if (ch.linkFolders) buildMenus(); });
+
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   if (info.menuItemId === 'save-image') {
     if (!/^https?:/.test(info.srcUrl || '')) return chrome.notifications.create({type: 'basic', iconUrl: 'icons/128.png', title: 'Refbox', message: 'This image cannot be saved from here. Try opening it in its own tab first.'});
     capture(info.srcUrl, info.pageUrl, tab && tab.title).catch(() => chrome.notifications.create({type: 'basic', iconUrl: 'icons/128.png', title: 'Refbox could not save this image', message: 'The site did not allow the download.'}));
   }
-  if (info.menuItemId === 'save-link' && tab) {
-    const {links = []} = await chrome.storage.local.get('links');
-    if (!links.some(l => l.url === tab.url)) links.unshift({id: 'l' + Date.now(), name: tab.title || host(tab.url), url: tab.url, from: siteOf(tab.url)});
-    await chrome.storage.local.set({links});
+  const id = String(info.menuItemId);
+  if (id.startsWith('folder:')) {
+    const url = info.linkUrl || info.pageUrl;
+    saveLink(url, info.linkUrl ? (info.selectionText || host(url)) : tab && tab.title, id.slice(7));
+  }
+  if (id === 'new-folder') {
+    await chrome.storage.session.set({pendingLink: {url: info.linkUrl || info.pageUrl, title: info.linkUrl ? host(info.linkUrl) : tab && tab.title}});
+    openApp('links');
   }
 });
+chrome.runtime.onMessage.addListener(msg => { if (msg && msg.type === 'save-link') saveLink(msg.url, msg.title, msg.folder); });
 
 // Toolbar icon opens the library (reusing an open tab)
-async function openApp() {
-  const url = chrome.runtime.getURL('app.html');
-  const [t] = await chrome.tabs.query({url});
-  if (t) { await chrome.tabs.update(t.id, {active: true}); await chrome.windows.update(t.windowId, {focused: true}); }
+async function openApp(view) {
+  const base = chrome.runtime.getURL('app.html'), url = typeof view === 'string' ? base + '#' + view : base;
+  const [t] = await chrome.tabs.query({url: base + '*'});
+  if (t) { await chrome.tabs.update(t.id, {active: true, url}); await chrome.windows.update(t.windowId, {focused: true}); }
   else await chrome.tabs.create({url});
   await chrome.storage.session.set({unseen: 0}); chrome.action.setBadgeText({text: ''});
 }
-chrome.action.onClicked.addListener(openApp);
-chrome.notifications.onClicked.addListener(openApp);
+chrome.action.onClicked.addListener(() => openApp());
+chrome.notifications.onClicked.addListener(() => openApp());

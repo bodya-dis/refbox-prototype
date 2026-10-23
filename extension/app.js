@@ -7,7 +7,7 @@ const TYPES = {
   typography: {label: 'Typography', pl: 'type compositions', c: 'var(--t-typography)'},
   footer: {label: 'Footer', pl: 'footers', c: 'var(--t-footer)'}
 };
-const S = {images: [], elements: [], nav: {view: 'grid', folder: {k: 'recent'}}, back: [], fwd: [], q: '', outlines: false, details: false, open: new Set(), capture: true, seq: 1, extra: 0, customTags: [], deletedTags: new Set(), addingTag: false, theme: 'dark',
+const S = {images: [], elements: [], nav: {view: 'grid', folder: {k: 'recent'}}, back: [], fwd: [], q: '', outlines: false, details: false, open: new Set(), capture: true, seq: 1, extra: 0, customTags: [], deletedTags: new Set(), linkFolders: ['Favorites'], lastFolder: 'Favorites', pendingLink: null, addingTag: false, theme: 'dark',
   links: [{id: 'l1', name: 'Awwwards · Sites of the Day', url: 'https://www.awwwards.com/websites/sites_of_the_day/', from: 'example'}, {id: 'l2', name: 'Dribbble · Popular shots', url: 'https://dribbble.com/shots/popular', from: 'example'}]};
 const EYEBROW = {'Atelier Nord': 'Studio · since 2009', 'Lumen Skin': 'New · Autumn ritual', 'Vela Hotels': 'Adriatic collection', 'Pulse Finance': 'Personal finance', 'Noir Gallery': 'Now showing', 'Okra Kitchen': 'Lviv · open daily', 'Sora Architects': 'Residential', 'Grain Bakery': 'Since 1987'};
 /* Header detection for imported images. Strict: when any check fails, no header is saved. */
@@ -321,10 +321,16 @@ function elCard(e) {
     <div class="row"><span class="s">${Math.round(e.conf * 100)}% · ${esc(p.site)}</span><button class="link" data-act="open-parent" data-id="${e.id}">Full design ↗</button></div></div>` : ''}</article>`;
 }
 const detailsToggle = () => `<button class="btn tog" data-act="details-all" aria-pressed="${S.details}">${S.details ? 'Hide details' : 'Show details'}</button>`;
+/* Links live in folders; "Favorites" is the default */
+const folderOf = l => l.folder || S.linkFolders[0];
 function renderLinks() {
-  return `<div class="head"><h1>Links</h1><span class="count">${S.links.length} sites</span></div>
-    <form class="linkform" data-form="link"><input id="link-url" type="url" placeholder="https://site-you-liked.com" aria-label="Site address" required><input id="link-name" placeholder="Name (optional)" aria-label="Name"><button class="btn primary" type="submit">+ Add link</button></form>
-    ${S.links.length ? `<ul class="links">${S.links.map(l => `<li><a href="${esc(l.url)}" target="_blank" rel="noopener"><span class="ln">${esc(l.name)}</span><span class="lu">${esc(l.url.replace(/^https?:\/\//, '').replace(/\/$/, ''))}</span></a>${l.from ? `<span class="lf">${esc(l.from)}</span>` : ''}<button class="x" data-act="rm-link" data-id="${l.id}" aria-label="Delete link ${esc(l.name)}">×</button></li>`).join('')}</ul>` : '<div class="empty"><b>No links yet.</b><span>Add a site above, or use the browser extension to save the page you are on.</span></div>'}`;
+  const groups = S.linkFolders.map(f => [f, S.links.filter(l => folderOf(l) === f)]);
+  for (const l of S.links) if (!S.linkFolders.includes(folderOf(l))) S.linkFolders.push(folderOf(l));
+  return `<div class="head"><h1>Links</h1><span class="count">${S.links.length} sites · ${S.linkFolders.length} ${S.linkFolders.length === 1 ? 'folder' : 'folders'}</span></div>
+    <form class="linkform" data-form="link"><input id="link-url" type="url" placeholder="https://site-you-liked.com" aria-label="Site address" required value="${esc(S.pendingLink ? S.pendingLink.url : '')}"><input id="link-name" placeholder="Name (optional)" aria-label="Name" value="${esc(S.pendingLink ? S.pendingLink.title || '' : '')}">
+      <select id="link-folder" aria-label="Folder">${S.linkFolders.map(f => `<option ${f === S.lastFolder ? 'selected' : ''}>${esc(f)}</option>`).join('')}</select><button class="btn primary" type="submit">+ Save link</button></form>
+    <form class="linkform" data-form="folder"><input id="folder-name" placeholder="New folder, e.g. Portfolio sites" aria-label="New folder name" autocomplete="off"><button class="btn" type="submit">+ Folder</button></form>
+    ${groups.map(([f, ls]) => `<section class="sec lgroup"><h2>${esc(f)} · ${ls.length}</h2>${ls.length ? `<ul class="links">${ls.map(l => `<li><a href="${esc(l.url)}" target="_blank" rel="noopener"><span class="ln">${esc(l.name)}</span><span class="lu">${esc(l.url.replace(/^https?:\/\//, '').replace(/\/$/, ''))}</span></a>${l.from ? `<span class="lf">${esc(l.from)}</span>` : ''}<button class="x" data-act="rm-link" data-id="${l.id}" aria-label="Delete link ${esc(l.name)}">×</button></li>`).join('')}</ul>` : '<div class="note">Empty folder. Right-click any link in Chrome → Save link to Refbox.</div>'}</section>`).join('')}`;
 }
 function renderGrid() {
   const f = S.nav.folder;
@@ -593,7 +599,17 @@ document.addEventListener('submit', ev => {
     ev.preventDefault();
     let url = $('link-url').value.trim(); if (!/^https?:\/\//.test(url)) url = 'https://' + url;
     let name = $('link-name').value.trim(); try { name = name || new URL(url).hostname.replace(/^www\./, ''); } catch (e) { return toast('That address does not look right. Try https://example.com'); }
-    S.links.unshift({id: 'l' + Date.now(), name, url}); render(); return toast(`Added “${name}”`);
+    const folder = $('link-folder').value; S.lastFolder = folder;
+    const ex = S.links.find(l => l.url === url); if (ex) ex.folder = folder; else S.links.unshift({id: 'l' + Date.now(), name, url, folder});
+    S.pendingLink = null; render(); return toast(`Saved “${name}” to ${folder}`);
+  }
+  if (ev.target.dataset.form === 'folder') {
+    ev.preventDefault();
+    const f = $('folder-name').value.trim(); if (!f) return;
+    if (S.linkFolders.some(x => x.toLowerCase() === f.toLowerCase())) return toast(`“${f}” already exists`);
+    S.linkFolders.push(f); S.lastFolder = f;
+    if (S.pendingLink) { const p = S.pendingLink; S.links.unshift({id: 'l' + Date.now(), name: p.title || p.url, url: p.url, folder: f}); S.pendingLink = null; render(); return toast(`Folder “${f}” created and the link saved there`); }
+    render(); return toast(`Folder “${f}” created`);
   }
   if (ev.target.dataset.form === 'note') {
     ev.preventDefault(); if (S.rec) S.rec.stop();
@@ -649,19 +665,23 @@ setTheme(savedTheme);
 if (EXT) {
   document.querySelector('[data-act="simulate"]').hidden = true;
   S.links = [];
-  chrome.storage.local.get(['enabled', 'links'], v => {
+  if (location.hash === '#links') S.nav = {view: 'grid', folder: {k: 'links'}};
+  chrome.storage.session.get('pendingLink', v => { if (v.pendingLink) { S.pendingLink = v.pendingLink; chrome.storage.session.remove('pendingLink'); S.nav = {view: 'grid', folder: {k: 'links'}}; render(); setTimeout(() => $('folder-name') && $('folder-name').focus(), 50); } });
+  chrome.storage.local.get(['enabled', 'links', 'linkFolders'], v => {
+    if (Array.isArray(v.linkFolders) && v.linkFolders.length) S.linkFolders = v.linkFolders;
     S.capture = v.enabled !== false; $('capture').setAttribute('aria-pressed', S.capture); $('capLbl').textContent = S.capture ? 'Capture on' : 'Capture off';
-    S.links = Array.isArray(v.links) ? v.links : []; render();
+    S.links = Array.isArray(v.links) ? v.links : []; S.extLoaded = true; render();
   });
   chrome.storage.onChanged.addListener(ch => {
     if (ch.lastCapture) loadCaptures(false);
     if (ch.links && JSON.stringify(ch.links.newValue) !== JSON.stringify(S.links)) { S.links = ch.links.newValue || []; render(); }
+    if (ch.linkFolders && JSON.stringify(ch.linkFolders.newValue) !== JSON.stringify(S.linkFolders)) { S.linkFolders = ch.linkFolders.newValue || ['Favorites']; render(); }
   });
   chrome.action && chrome.action.setBadgeText({text: ''});
   loadCaptures(true);
 }
 /* keep tags of real captures and the links list across reloads */
 const baseRender = render;
-render = function () { baseRender(); if (EXT) { saveTags(); chrome.storage.local.set({links: S.links}); } };
+render = function () { baseRender(); if (EXT) { saveTags(); if (S.extLoaded) chrome.storage.local.set({links: S.links, linkFolders: S.linkFolders}); } };
 render();
 })();
