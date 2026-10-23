@@ -459,13 +459,35 @@ function refCard() {
   if (e) lines.push(`element: ${TYPES[e.type].label.toLowerCase()} · ${Math.round(e.box.w)}×${Math.round(e.box.h)} px at x ${Math.round(e.box.x)}, y ${Math.round(e.box.y)} of ${i.w}×${i.h}${e.box.note ? ' · ' + e.box.note : ''}`);
   else if (elsOf(i.id).length) lines.push(`elements: ${elsOf(i.id).map(x => TYPES[x.type].label.toLowerCase()).join(', ')}`);
   for (const n of (i.notes || []).slice(-3)) lines.push(`note: ${[n.liked.join(', '), n.text].filter(Boolean).join(' — ')}`);
-  if (i.video) lines.push('(the picture is the first frame of the video)');
+  if (i.video) lines.push('(the picture shows 6 frames of the video in order: left to right, top to bottom, with times)');
   return lines.join('\n');
+}
+/* For a video: six evenly spaced frames on one sheet, so the motion is visible in a still picture */
+function contactSheet(src) {
+  return new Promise((res, rej) => {
+    const v = document.createElement('video'); v.muted = true; v.preload = 'auto'; v.src = src;
+    v.onerror = () => rej(new Error('video'));
+    v.onloadedmetadata = async () => {
+      const n = 6, cols = 3, tw = 480, th = Math.round(tw * v.videoHeight / v.videoWidth), pad = 12, lab = 26;
+      const c = document.createElement('canvas'); c.width = cols * tw + (cols + 1) * pad; c.height = 2 * (th + lab) + 3 * pad;
+      const g = c.getContext('2d'); g.fillStyle = '#111114'; g.fillRect(0, 0, c.width, c.height);
+      g.font = '600 15px system-ui, sans-serif'; g.fillStyle = '#f2f2f5';
+      for (let k = 0; k < n; k++) {
+        const t = v.duration * (k + 0.5) / n;
+        await new Promise(ok => { v.onseeked = ok; v.currentTime = t; });
+        const x = pad + (k % cols) * (tw + pad), y = pad + Math.floor(k / cols) * (th + lab + pad);
+        g.drawImage(v, x, y + lab, tw, th);
+        g.fillText(`${k + 1}  ·  ${t.toFixed(1)} s of ${v.duration.toFixed(1)} s`, x, y + 18);
+      }
+      c.toBlob(res, 'image/png');
+    };
+  });
 }
 function copyForClaude() {
   const v = S.nav.view; if (v === 'grid') return;
   const text = refCard();
-  const png = v === 'image' ? new Promise(res => curImg().canvas.toBlob(res, 'image/png')) : Promise.resolve(pngFromDataURL(curEl().src));
+  const ci = v === 'image' ? curImg() : null;
+  const png = ci && ci.video ? contactSheet(ci.video).catch(() => new Promise(res => ci.canvas.toBlob(res, 'image/png'))) : ci ? new Promise(res => ci.canvas.toBlob(res, 'image/png')) : Promise.resolve(pngFromDataURL(curEl().src));
   try {
     navigator.clipboard.write([new ClipboardItem({'image/png': png, 'text/plain': new Blob([text], {type: 'text/plain'})})])
       .then(() => toast('Copied the picture and its card. Paste into Claude with ⌘V.', 'Text only', () => navigator.clipboard.writeText(text).then(() => toast('Copied the card as text.'))))
