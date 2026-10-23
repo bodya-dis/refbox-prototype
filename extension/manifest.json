@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Refbox",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Catches images you save on Awwwards, Pinterest, Dribbble and Instagram and sorts them into tags and design elements.",
   "background": {
     "service_worker": "background.js"
@@ -26,7 +26,8 @@
     "storage",
     "unlimitedStorage",
     "notifications",
-    "activeTab"
+    "activeTab",
+    "scripting"
   ],
   "host_permissions": [
     "https://*.awwwards.com/*",

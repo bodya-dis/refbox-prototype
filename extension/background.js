@@ -65,13 +65,53 @@ async function awwardsCase(url) {
   const c = awwContext[host(url).replace(/^www\./, '')];
   return c && Date.now() - c.at < 60 * 60e3 ? c.case : '';
 }
+// Runs inside the page: a crosshair like ⇧⌘4. Drag = area, Enter or a plain click = whole screen, Esc = cancel.
+function selectArea() {
+  return new Promise(resolve => {
+    const all = () => ({x: 0, y: 0, w: innerWidth, h: innerHeight, vw: innerWidth});
+    const ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;z-index:2147483647;cursor:crosshair;background:rgba(0,0,0,.25)';
+    const box = document.createElement('div');
+    box.style.cssText = 'position:fixed;display:none;pointer-events:none;border:1.5px solid #fff;box-shadow:0 0 0 9999px rgba(0,0,0,.35)';
+    const tip = document.createElement('div');
+    tip.textContent = 'Drag to select · Enter: whole screen · Esc: cancel';
+    tip.style.cssText = 'position:fixed;top:12px;left:50%;transform:translateX(-50%);background:#1c1c21;color:#f2f2f5;font:13px system-ui,sans-serif;padding:6px 12px;border-radius:8px;pointer-events:none';
+    ov.append(box, tip); document.documentElement.append(ov);
+    let sx = 0, sy = 0, drag = false;
+    const finish = r => { ov.remove(); removeEventListener('keydown', key, true); requestAnimationFrame(() => requestAnimationFrame(() => resolve(r))); };
+    const key = e => {
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); finish(null); }
+      if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); finish(all()); }
+    };
+    const rect = e => {
+      const x = Math.min(sx, e.clientX), y = Math.min(sy, e.clientY), w = Math.abs(e.clientX - sx), h = Math.abs(e.clientY - sy);
+      Object.assign(box.style, {left: x + 'px', top: y + 'px', width: w + 'px', height: h + 'px'});
+      return {x, y, w, h, vw: innerWidth};
+    };
+    addEventListener('keydown', key, true);
+    ov.addEventListener('mousedown', e => { e.preventDefault(); sx = e.clientX; sy = e.clientY; drag = true; ov.style.background = 'transparent'; tip.style.display = 'none'; box.style.display = 'block'; rect(e); });
+    ov.addEventListener('mousemove', e => { if (drag) rect(e); });
+    ov.addEventListener('mouseup', e => { if (!drag) return; drag = false; const r = rect(e); finish(r.w < 8 || r.h < 8 ? all() : r); });
+  });
+}
+async function cropTo(blob, r) {
+  const bmp = await createImageBitmap(blob), s = bmp.width / r.vw;
+  const w = Math.round(r.w * s), h = Math.round(r.h * s);
+  const c = new OffscreenCanvas(w, h);
+  c.getContext('2d').drawImage(bmp, Math.round(r.x * s), Math.round(r.y * s), w, h, 0, 0, w, h);
+  return c.convertToBlob({type: 'image/png'});
+}
 async function screenshot(tab) {
   if (!tab || !/^https?:/.test(tab.url || '')) {
     return chrome.notifications.create({type: 'basic', iconUrl: 'icons/128.png', title: 'Refbox', message: 'Screenshots work on regular web pages only.'});
   }
+  let area;
+  try { const [res] = await chrome.scripting.executeScript({target: {tabId: tab.id}, func: selectArea}); area = res && res.result; if (area === null) return; }
+  catch (e) { area = undefined; }   // pages that refuse the crosshair: take the whole screen
   try {
     const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, {format: 'png'});
-    const blob = await (await fetch(dataUrl)).blob();
+    let blob = await (await fetch(dataUrl)).blob();
+    if (area && !(area.x === 0 && area.y === 0 && area.w === area.vw)) blob = await cropTo(blob, area);
     const caseUrl = await awwardsCase(tab.url);
     const site = caseUrl ? 'awwwards.com' : SOURCE_HOSTS.test(host(tab.url)) ? siteOf(tab.url) : host(tab.url).replace(/^www\./, '');
     await store(blob, {url: '', page: tab.url, site, caseUrl, name: tab.title || host(tab.url), kind: 'screenshot'}, caseUrl ? 'Awwwards screenshot saved' : 'Screenshot saved to Refbox');
