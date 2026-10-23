@@ -243,7 +243,7 @@ const fkey = f => f.k + ':' + (f.v || '');
 const sameF = (a, b) => a && b && fkey(a) === fkey(b);
 function folderLabel(f) { return f.k === 'recent' ? 'Recently saved' : f.k === 'tag' ? f.v : f.k === 'type' ? TYPES[f.v].label : f.k === 'links' ? 'Links' : 'Needs attention'; }
 /* Pinned tag folders are always visible, even when empty; tags you add stay visible too */
-const PINNED = ['mobile design', 'mobile prototype'];
+const PINNED = ['animation', 'mobile design', 'mobile prototype'];
 function tagCounts() {
   const m = new Map();
   for (const i of S.images) for (const t of i.tags) m.set(t, (m.get(t) || 0) + 1);
@@ -310,7 +310,7 @@ function imgCard(i, bare) {
   const n = elsOf(i.id).length, open = !bare || S.details || S.open.has(i.id);
   const st = i.status === 'processing' ? '<span class="badge proc"><span class="spin"></span>Processing</span>' : i.status === 'failed' ? '<span class="badge fail">Processing failed</span>' : '';
   return `<article class="card ${open ? '' : 'bare'}" data-id="${i.id}"><div class="tw">
-    <button class="thumb" data-act="open-img" data-id="${i.id}" aria-label="Open ${esc(i.name)}"><img src="${i.src}" alt="">${st}${open && i.status === 'ready' ? `<span class="badge">◧ ${n}</span>` : ''}</button>
+    <button class="thumb" data-act="open-img" data-id="${i.id}" aria-label="Open ${esc(i.name)}"><img src="${i.gif || i.src}" alt="">${st}${i.video ? '<span class="badge kind">▶ Video</span>' : i.gif ? '<span class="badge kind">GIF</span>' : ''}${open && i.status === 'ready' ? `<span class="badge">◧ ${n}</span>` : ''}</button>
     ${bare ? infoBtn(i.id, i.name, open) : ''}</div>
     ${open ? `<div class="meta"><span class="t">${esc(i.name)}</span><span class="s">${esc(i.site)} · ${rel(i.savedAt)}</span>
     <div class="mini-tags">${i.tags.length ? i.tags.map(t => `<span>${esc(t)}</span>`).join('') : '<span>no tags</span>'}</div></div>` : ''}</article>`;
@@ -358,7 +358,7 @@ function renderImage() {
   const folders = [{k: 'recent'}, ...i.tags.map(t => ({k: 'tag', v: t}))];
   return `<div class="detail"><div class="col">
     <div class="bar"><button class="btn" id="peek-btn" data-act="outlines" aria-pressed="${S.outlines}" ${els.length ? '' : 'disabled'}>◧ ${S.outlines ? 'Hide elements' : 'Show elements'}</button>${hl ? '<button class="btn" data-act="clear-hl">Clear highlight</button>' : ''}<button class="btn" data-act="copy" title="Copy image (⌘C)">⧉ Copy for Figma</button><span class="seg" role="group" aria-label="Zoom"><button data-act="zoom" data-v="fit" aria-pressed="${S.zoom !== 'actual'}">Fit width</button><button data-act="zoom" data-v="actual" aria-pressed="${S.zoom === 'actual'}">100%</button></span><span class="hint">${els.length ? (S.outlines ? 'Click an outline to open that element.' : 'Hover to preview the breakdown, click to keep it on.') : ''}</span></div>
-    <div class="stage ${hl ? 'hl' : ''} ${S.outlines ? '' : 'off'}" id="stage" tabindex="0" aria-label="${esc(i.name)}, scrollable"><div class="canvas" style="width:${S.zoom === 'actual' ? i.w + 'px' : '100%'}"><img src="${i.src}" alt="${esc(i.name)}">${boxes}</div></div>
+    <div class="stage ${hl ? 'hl' : ''} ${S.outlines ? '' : 'off'}" id="stage" tabindex="0" aria-label="${esc(i.name)}, scrollable"><div class="canvas" style="width:${S.zoom === 'actual' ? i.w + 'px' : '100%'}">${i.video ? `<video src="${i.video}" controls loop muted autoplay playsinline style="width:100%;display:block"></video>` : `<img src="${i.gif || i.src}" alt="${esc(i.name)}">`}${boxes}</div></div>
     <section class="sec"><h2>Elements (${els.length})</h2><div class="strip">${strip}</div></section>
   </div>
   <aside class="panel">
@@ -468,6 +468,8 @@ function simulate() {
 }
 /* One path for every real image: imported files and, in the extension, captures from the browser */
 function addBlob(blob, meta) {
+  if (/^video\//.test(blob.type)) return addVideo(blob, meta);
+  const gif = blob.type === 'image/gif' ? URL.createObjectURL(blob) : null;
   const fr = new FileReader();
   fr.onload = () => {
     const im = new Image();
@@ -475,7 +477,7 @@ function addBlob(blob, meta) {
       const sc = Math.min(1, 1400 / im.naturalWidth), w = Math.round(im.naturalWidth * sc), h = Math.round(im.naturalHeight * sc);
       const c = document.createElement('canvas'); c.width = w; c.height = h; c.getContext('2d').drawImage(im, 0, 0, w, h);
       const ratio = h / w, mobile = ratio >= 1.9 && ratio <= 2.4;   /* phone screen proportions, e.g. 1179×2556 */
-      const img = {id: uid('img'), name: meta.name, site: meta.site || 'imported file', page: meta.page, caseUrl: meta.caseUrl, capId: meta.capId, autoTags: mobile ? ['mobile design'] : [], tags: loadTags(meta.capId), canvas: c, src: c.toDataURL('image/jpeg', .9), w, h, demo: true,
+      const img = {id: uid('img'), name: meta.name, site: meta.site || 'imported file', page: meta.page, caseUrl: meta.caseUrl, capId: meta.capId, autoTags: [...(mobile ? ['mobile design'] : []), ...(gif ? ['animation'] : [])], gif, tags: loadTags(meta.capId), canvas: c, src: c.toDataURL('image/jpeg', .9), w, h, demo: true,
         boxes: [detectBand(c, 'top'), detectBand(c, 'bottom')].filter(Boolean), removed: new Set(), savedAt: meta.savedAt || Date.now(), status: 'received'};
       S.images.push(img); loadNotes(img); process(img, meta.quiet);
     };
@@ -484,8 +486,26 @@ function addBlob(blob, meta) {
   };
   fr.readAsDataURL(blob);
 }
+/* Videos: the first frame becomes the thumbnail; the file itself plays in the image view */
+function addVideo(blob, meta) {
+  const url = URL.createObjectURL(blob), v = document.createElement('video');
+  v.muted = true; v.preload = 'auto'; v.playsInline = true;
+  v.onloadeddata = () => { v.currentTime = Math.min(0.5, (v.duration || 1) / 4); };
+  v.onseeked = () => {
+    v.onseeked = null;
+    const sc = Math.min(1, 1400 / v.videoWidth), w = Math.round(v.videoWidth * sc), h = Math.round(v.videoHeight * sc);
+    const c = document.createElement('canvas'); c.width = w; c.height = h; c.getContext('2d').drawImage(v, 0, 0, w, h);
+    const ratio = h / w;
+    const img = {id: uid('img'), name: meta.name, site: meta.site || 'imported file', page: meta.page, caseUrl: meta.caseUrl, capId: meta.capId, video: url,
+      autoTags: ['animation', ...(ratio >= 1.9 && ratio <= 2.4 ? ['mobile design'] : [])], tags: loadTags(meta.capId), canvas: c, src: c.toDataURL('image/jpeg', .85), w, h, demo: true,
+      boxes: [], removed: new Set(), savedAt: meta.savedAt || Date.now(), status: 'received'};
+    S.images.push(img); loadNotes(img); process(img, meta.quiet);
+  };
+  v.onerror = () => toast(`“${meta.name}” could not be played. Try an MP4 or WebM file.`);
+  v.src = url;
+}
 function importFiles(files) {
-  [...files].filter(f => f.type.startsWith('image/')).forEach((f, k) => addBlob(f, {name: f.name.replace(/\.[^.]+$/, ''), savedAt: Date.now() + k}));
+  [...files].filter(f => /^(image|video)\//.test(f.type)).forEach((f, k) => addBlob(f, {name: f.name.replace(/\.[^.]+$/, ''), savedAt: Date.now() + k}));
 }
 function loadTags(capId) { if (!capId) return []; try { const v = JSON.parse(localStorage.getItem('refbox-tags:' + capId) || '[]'); return Array.isArray(v) ? v : []; } catch (e) { return []; } }
 function saveTags() { for (const i of S.images) if (i.capId) try { localStorage.setItem('refbox-tags:' + i.capId, JSON.stringify(i.tags)); } catch (e) {} }

@@ -23,14 +23,21 @@
   const visible = im => { const r = im.getBoundingClientRect(); return r.width >= 150 && r.height >= 150 && r.bottom > 0 && r.top < innerHeight; };
   const largest = list => list.filter(visible).sort((x, y) => area(y) - area(x))[0];
 
-  // the image that belongs to this button: nearest card or post first, then the biggest image on screen
-  function imageFor(button) {
+  // the media that belongs to this button: a video wins over an image in the same card or post
+  const vids = node => [...node.querySelectorAll('video')].filter(visible).sort((x, y) => area(y) - area(x));
+  function mediaFor(button) {
     let node = button.parentElement;
     for (let i = 0; i < 10 && node; i++, node = node.parentElement) {
-      const im = largest([...node.querySelectorAll('img')]);
-      if (im) return im;
+      const v = vids(node)[0]; if (v) return {video: v};
+      const im = largest([...node.querySelectorAll('img')]); if (im) return {img: im};
     }
-    return largest([...document.images]);
+    const v = vids(document)[0]; if (v) return {video: v};
+    const im = largest([...document.images]); return im ? {img: im} : null;
+  }
+  const abs = u => { try { return new URL(u, location.href).href; } catch (e) { return u || ''; } };
+  function videoSrc(v) {
+    const s = v.currentSrc || v.src || ((v.querySelector('source[src]') || {}).src) || '';
+    return abs(s);
   }
 
   function bestSrc(im) {
@@ -86,8 +93,13 @@
   document.addEventListener('click', e => {
     const b = saveButton(e.target);
     if (!b) return;
-    const im = imageFor(b);
-    if (!im) return chrome.runtime.sendMessage({type: 'log', ok: false, site: location.hostname, text: 'Save pressed, but no image was found next to it'});
+    const m = mediaFor(b);
+    if (!m) return chrome.runtime.sendMessage({type: 'log', ok: false, site: location.hostname, text: 'Save pressed, but no image or video was found next to it'});
+    if (m.video) {
+      const src = videoSrc(m.video), poster = m.video.poster ? abs(m.video.poster) : (largest([...(m.video.closest('article, [data-test-id]') || document).querySelectorAll('img')]) || {}).src;
+      return chrome.runtime.sendMessage({type: 'capture', url: /^https?:/.test(src) ? src : (poster || ''), poster, page: location.href, title: document.title});
+    }
+    const im = m.img;
     const url = bestSrc(im);
     if (!/^https?:/.test(url)) return chrome.runtime.sendMessage({type: 'log', ok: false, site: location.hostname, text: 'This image cannot be downloaded directly (it is not a regular web address)'});
     chrome.runtime.sendMessage({type: 'capture', url, page: location.href, title: document.title});

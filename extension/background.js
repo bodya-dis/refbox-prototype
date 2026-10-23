@@ -2,7 +2,7 @@
 
 const SOURCE_HOSTS = /(^|\.)(awwwards\.com|pinterest\.[a-z.]+|pinimg\.com|dribbble\.com|instagram\.com|cdninstagram\.com|fbcdn\.net)$/i;
 const IMAGE_HOSTS = /(^|\.)(pinimg\.com|cdn\.dribbble\.com|cdninstagram\.com|fbcdn\.net|assets\.awwwards\.com)$/i;
-const IMAGE_EXT = /\.(png|jpe?g|webp|gif|avif)(\?|#|$)/i;
+const IMAGE_EXT = /\.(png|jpe?g|webp|gif|avif|mp4|webm|mov|m4v)(\?|#|$)/i;   // images, GIFs and videos
 const bypass = new Set();   // URLs we hand back to Chrome after a failed capture
 
 const host = u => { try { return new URL(u).hostname; } catch (e) { return ''; } };
@@ -47,7 +47,10 @@ async function fetchImage(url) {
   // Pinterest serves resized copies; ask for the original first.
   const tries = /pinimg\.com/.test(url) ? [url.replace(/\/\d+x(\d+)?\//, '/originals/'), url] : [url];
   for (const u of tries) {
-    try { const r = await fetch(u, {credentials: 'include'}); if (r.ok) { const b = await r.blob(); if (b.type.startsWith('image/')) return b; } } catch (e) {}
+    try {
+      const r = await fetch(u, {credentials: 'include'});
+      if (r.ok) { const b = await r.blob(); if (/mpegurl/i.test(b.type)) throw new Error('streamed video'); if (/^(image|video)\//.test(b.type)) return b; }
+    } catch (e) { if (e.message === 'streamed video') throw e; }
   }
   throw new Error('Could not download the image');
 }
@@ -60,11 +63,19 @@ async function store(blob, rec, heading) {
   chrome.action.setBadgeBackgroundColor({color: '#B84A6C'});
   chrome.action.setBadgeText({text: String(unseen + 1)});
   chrome.notifications.create(id, {type: 'basic', iconUrl: 'icons/128.png', title: heading || 'Saved to Refbox', message: `From ${rec.site}`, priority: 0});
-  log(true, rec.site, rec.kind === 'screenshot' ? 'Screenshot saved' : 'Image saved');
+  log(true, rec.site, rec.kind === 'screenshot' ? 'Screenshot saved' : /^video\//.test(blob.type) ? 'Video saved' : blob.type === 'image/gif' ? 'GIF saved' : 'Image saved');
 }
-async function capture(url, page, title) {
-  const blob = await fetchImage(url);
-  await store(blob, {url, page: page || '', site: siteOf(page, url), name: title || nameFrom(url)});
+async function capture(url, page, title, poster) {
+  let blob;
+  try { blob = await fetchImage(url); }
+  catch (e) {
+    // a streamed video (Pinterest, Instagram) has no single file: keep its cover image instead
+    if (!poster) throw e;
+    blob = await fetchImage(poster);
+    log(false, siteOf(page, url), 'This video is streamed and cannot be saved as a file; its cover image was saved');
+  }
+  await store(blob, {url, page: page || '', site: siteOf(page, url), name: title || nameFrom(url), kind: /^video\//.test(blob.type) ? 'video' : blob.type === 'image/gif' ? 'gif' : 'image'},
+    /^video\//.test(blob.type) ? 'Video saved to Refbox' : undefined);
 }
 
 // ---- screenshots: Option+Shift+S or right-click → Save screenshot to Refbox ----
@@ -144,7 +155,7 @@ chrome.downloads.onCreated.addListener(async item => {
   if (bypass.has(src)) { bypass.delete(src); return; }
   if (!(await enabled())) return;
   if (!SOURCE_HOSTS.test(host(page)) && !SOURCE_HOSTS.test(host(src))) return;
-  const looksImage = (item.mime || '').startsWith('image/') || IMAGE_EXT.test(src) || IMAGE_HOSTS.test(host(src));
+  const looksImage = /^(image|video)\//.test(item.mime || '') || IMAGE_EXT.test(src) || IMAGE_HOSTS.test(host(src));
   if (!looksImage || !/^https?:/.test(src)) return;   // blob: and data: downloads go through as usual
   try { await chrome.downloads.cancel(item.id); await chrome.downloads.erase({id: item.id}); } catch (e) {}
   try { await capture(src, page); }
@@ -163,7 +174,7 @@ chrome.runtime.onMessage.addListener(msg => {
     const now = Date.now();
     if (now - (recent.get(msg.url) || 0) < 15000) return;
     recent.set(msg.url, now);
-    try { await capture(msg.url, msg.page, msg.title); }
+    try { await capture(msg.url, msg.page, msg.title, msg.poster); }
     catch (e) { log(false, siteOf(msg.page, msg.url), 'Could not download the image: ' + e.message); chrome.notifications.create({type: 'basic', iconUrl: 'icons/128.png', title: 'Refbox could not save this image', message: 'Try right-click → Save to Refbox.'}); }
   })();
 });
@@ -183,6 +194,7 @@ async function saveLink(url, title, folder) {
 async function buildMenus() {
   await chrome.contextMenus.removeAll();
   chrome.contextMenus.create({id: 'save-image', title: 'Save to Refbox', contexts: ['image']});
+  chrome.contextMenus.create({id: 'save-video', title: 'Save video to Refbox', contexts: ['video']});
   chrome.contextMenus.create({id: 'screenshot', title: 'Save screenshot to Refbox  (⌥⇧S)', contexts: ['page']});
   chrome.contextMenus.create({id: 'link-root', title: 'Save link to Refbox', contexts: ['link', 'page']});
   for (const f of await folders()) chrome.contextMenus.create({id: 'folder:' + f, parentId: 'link-root', title: f, contexts: ['link', 'page']});
@@ -199,6 +211,10 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     capture(info.srcUrl, info.pageUrl, tab && tab.title).catch(() => chrome.notifications.create({type: 'basic', iconUrl: 'icons/128.png', title: 'Refbox could not save this image', message: 'The site did not allow the download.'}));
   }
   if (info.menuItemId === 'screenshot') return screenshot(tab);
+  if (info.menuItemId === 'save-video') {
+    if (!/^https?:/.test(info.srcUrl || '')) return log(false, host(info.pageUrl), 'This video is streamed and cannot be saved as a file. Use ⌥⇧S for a screenshot');
+    capture(info.srcUrl, info.pageUrl, tab && tab.title).catch(e => log(false, host(info.pageUrl), 'Could not save the video: ' + e.message));
+  }
   const id = String(info.menuItemId);
   if (id.startsWith('folder:')) {
     const url = info.linkUrl || info.pageUrl;
