@@ -293,7 +293,6 @@ select{height:34px; border-radius:8px; border:1px solid var(--line); background:
 <div class="ctx" id="ctx" hidden role="menu"></div>
 <div class="modal" id="modal" hidden></div>
 <div class="drop" id="drop" hidden>Drop images to save them</div>
-
 <script>
 (() => {
 const W = 1200, H = 900;
@@ -479,12 +478,15 @@ function detectHeader(c, P = DETECT) {
   const rows = [];
   for (let y = 0; y < sh; y++) { const s = [0, 0, 0]; for (let x = 0; x < sw; x++) { const o = (y * sw + x) * 4; s[0] += d[o]; s[1] += d[o + 1]; s[2] += d[o + 2]; } rows.push(s.map(v => v / sw)); }
   const avg = (a, b) => { const s = [0, 0, 0]; for (let y = a; y < b; y++) for (let j = 0; j < 3; j++) s[j] += rows[y][j]; return s.map(v => v / (b - a)); };
+  /* how much a row varies across its width: a header ends under its own plain padding, not under a logo */
+  const rowVar = rows.map((m, y) => { let s = 0; for (let x = 0; x < sw; x += 2) s += dist(px(x, y), m); return s / (sw / 2); });
+  const plainAbove = y => (rowVar[y - 1] + rowVar[y - 2]) / 2 < 12;
   let best = null;
   const y1 = Math.max(Math.ceil(sh * P.band[0]), Math.ceil(P.minBandPx / k), 3), y2 = Math.floor(sh * P.band[1]);
   for (let y = y1; y <= y2 && y + 4 < sh; y++) {
     const edge = dist(avg(y - 3, y), avg(y, y + 3));
     const line = Math.min(dist(rows[y], rows[y - 2]), dist(rows[y], rows[y + 2])) >= P.lineDelta && dist(rows[y - 2], rows[y + 2]) < 8;
-    const score = Math.max(edge >= P.edgeDelta ? edge : 0, line ? P.edgeDelta + 4 : 0);
+    const score = plainAbove(y) ? Math.max(edge >= P.edgeDelta ? edge : 0, line ? P.edgeDelta + 4 : 0) : 0;
     if (score && (!best || score > best.score)) best = {y, score};
   }
   if (!best) return null;
@@ -527,8 +529,10 @@ function process(img, quiet) {
   }, 1500);
 }
 const now = Date.now();
-SPECS.forEach((s, i) => { const img = addFromSpec(s, i + 1, now - (i + 1) * 3.4 * 3600e3, 'ready'); finishTags(img); makeElements(img); });
-addFromSpec(FAILED, 42, now - 30 * 60e3, 'failed');
+if (!(window.chrome && chrome.runtime && chrome.runtime.id)) {   /* sample designs only in the web prototype */
+  SPECS.forEach((s, i) => { const img = addFromSpec(s, i + 1, now - (i + 1) * 3.4 * 3600e3, 'ready'); finishTags(img); makeElements(img); });
+  addFromSpec(FAILED, 42, now - 30 * 60e3, 'failed');
+}
 
 /* ---------- Folders ---------- */
 const fkey = f => f.k + ':' + (f.v || '');
@@ -647,7 +651,7 @@ function renderImage() {
     ${i.status === 'failed' ? '<div class="note warn">Processing failed: tags and elements are missing. The image itself is saved.</div><button class="btn primary wide" data-act="reprocess">Try again</button>' : ''}
     ${i.status === 'processing' ? '<div class="note"><span class="spin" style="display:inline-block;vertical-align:-1px;margin-right:6px;border-color:var(--line);border-top-color:var(--acc)"></span>Tagging and detecting elements…</div>' : ''}
     <dl class="ess"><div><dt>Saved</dt><dd>${new Date(i.savedAt).toLocaleString([], {dateStyle: 'medium', timeStyle: 'short'})}</dd></div>
-      <div><dt>Source</dt><dd>${i.demo ? 'Imported file' : `<a href="https://${esc(i.site)}" target="_blank" rel="noopener">${esc(i.site)} ↗</a>`}</dd></div></dl>
+      <div><dt>Source</dt><dd>${i.page ? `<a href="${esc(i.page)}" target="_blank" rel="noopener">${esc(i.site)} ↗</a>` : i.demo ? 'Imported file' : `<a href="https://${esc(i.site)}" target="_blank" rel="noopener">${esc(i.site)} ↗</a>`}</dd></div></dl>
     <details class="more" id="more" ${S.moreOpen ? 'open' : ''}><summary>More <span>${i.tags.length} ${i.tags.length === 1 ? 'tag' : 'tags'} · ${els.length} elements</span></summary><div class="more-in">
     <section class="sec"><h2>Tags</h2>
       <div class="tags">${i.tags.map(t => `<span class="tag"><button data-act="folder" data-k="tag" data-v="${esc(t)}" title="Open folder">${esc(t)}</button><button class="x" data-act="rm-tag" data-v="${esc(t)}" aria-label="Remove tag ${esc(t)}">×</button></span>`).join('') || '<span style="color:var(--mute);font-size:12.5px">No confident tags. Add one below.</span>'}</div>
@@ -748,24 +752,38 @@ function simulate() {
   toast(`Captured from ${spec.site}`);
   process(img);
 }
-function importFiles(files) {
-  [...files].filter(f => f.type.startsWith('image/')).forEach((f, k) => {
-    const fr = new FileReader();
-    fr.onload = () => {
-      const im = new Image();
-      im.onload = () => {
-        const sc = Math.min(1, 1400 / im.naturalWidth), w = Math.round(im.naturalWidth * sc), h = Math.round(im.naturalHeight * sc);
-        const c = document.createElement('canvas'); c.width = w; c.height = h; c.getContext('2d').drawImage(im, 0, 0, w, h);
-        const ratio = h / w, mobile = ratio >= 1.9 && ratio <= 2.4;   /* phone screen proportions, e.g. 1179×2556 */
-        const img = {id: uid('img'), name: f.name.replace(/\.[^.]+$/, ''), site: 'imported file', autoTags: mobile ? ['mobile design'] : [], tags: [], canvas: c, src: c.toDataURL('image/jpeg', .9), w, h, demo: true,
-          boxes: [detectBand(c, 'top'), detectBand(c, 'bottom')].filter(Boolean), removed: new Set(), savedAt: Date.now() + k, status: 'received'};
-        S.images.push(img); process(img);
-      };
-      im.onerror = () => toast(`“${f.name}” could not be read. Try a PNG, JPEG or WebP file.`);
-      im.src = fr.result;
+/* One path for every real image: imported files and, in the extension, captures from the browser */
+function addBlob(blob, meta) {
+  const fr = new FileReader();
+  fr.onload = () => {
+    const im = new Image();
+    im.onload = () => {
+      const sc = Math.min(1, 1400 / im.naturalWidth), w = Math.round(im.naturalWidth * sc), h = Math.round(im.naturalHeight * sc);
+      const c = document.createElement('canvas'); c.width = w; c.height = h; c.getContext('2d').drawImage(im, 0, 0, w, h);
+      const ratio = h / w, mobile = ratio >= 1.9 && ratio <= 2.4;   /* phone screen proportions, e.g. 1179×2556 */
+      const img = {id: uid('img'), name: meta.name, site: meta.site || 'imported file', page: meta.page, capId: meta.capId, autoTags: mobile ? ['mobile design'] : [], tags: loadTags(meta.capId), canvas: c, src: c.toDataURL('image/jpeg', .9), w, h, demo: true,
+        boxes: [detectBand(c, 'top'), detectBand(c, 'bottom')].filter(Boolean), removed: new Set(), savedAt: meta.savedAt || Date.now(), status: 'received'};
+      S.images.push(img); loadNotes(img); process(img, meta.quiet);
     };
-    fr.readAsDataURL(f);
-  });
+    im.onerror = () => toast(`“${meta.name}” could not be read. Try a PNG, JPEG or WebP file.`);
+    im.src = fr.result;
+  };
+  fr.readAsDataURL(blob);
+}
+function importFiles(files) {
+  [...files].filter(f => f.type.startsWith('image/')).forEach((f, k) => addBlob(f, {name: f.name.replace(/\.[^.]+$/, ''), savedAt: Date.now() + k}));
+}
+function loadTags(capId) { if (!capId) return []; try { const v = JSON.parse(localStorage.getItem('refbox-tags:' + capId) || '[]'); return Array.isArray(v) ? v : []; } catch (e) { return []; } }
+function saveTags() { for (const i of S.images) if (i.capId) try { localStorage.setItem('refbox-tags:' + i.capId, JSON.stringify(i.tags)); } catch (e) {} }
+
+/* ---------- Extension mode: real captures from Chrome ---------- */
+const EXT = !!(window.chrome && chrome.runtime && chrome.runtime.id);
+const idb = () => new Promise((res, rej) => { const r = indexedDB.open('refbox', 1); r.onupgradeneeded = () => r.result.createObjectStore('captures', {keyPath: 'id'}); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+async function idbAll() { const d = await idb(); return new Promise((res, rej) => { const q = d.transaction('captures').objectStore('captures').getAll(); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); }); }
+async function idbDel(id) { const d = await idb(); d.transaction('captures', 'readwrite').objectStore('captures').delete(id); }
+async function loadCaptures(quiet) {
+  const known = new Set(S.images.map(i => i.capId));
+  for (const r of (await idbAll()).sort((a, b) => a.savedAt - b.savedAt)) if (!known.has(r.id)) addBlob(r.blob, {name: r.name, site: r.site, page: r.page, capId: r.id, savedAt: r.savedAt, quiet});
 }
 const ACT = {
   back: goBack, fwd: goFwd,
@@ -777,13 +795,14 @@ const ACT = {
   'clear-hl': () => { S.nav = {...S.nav, hl: null}; render(); },
   'clear-q': () => { S.q = ''; $('q').value = ''; render(); },
   simulate,
-  capture: () => { S.capture = !S.capture; $('capture').setAttribute('aria-pressed', S.capture); $('capLbl').textContent = S.capture ? 'Capture on' : 'Capture off'; toast(S.capture ? 'Capture is on. Saved images go to Recently saved.' : 'Capture is off. Images save to Downloads as usual.'); },
+  capture: () => { S.capture = !S.capture; if (EXT) chrome.storage.local.set({enabled: S.capture}); $('capture').setAttribute('aria-pressed', S.capture); $('capLbl').textContent = S.capture ? 'Capture on' : 'Capture off'; toast(S.capture ? 'Capture is on. Saved images go to Recently saved.' : 'Capture is off. Images save to Downloads as usual.'); },
   'rm-tag': el => { const i = curImg(), t = el.dataset.v; i.tags = i.tags.filter(x => x !== t); render(); toast(`Removed “${t}” from ${i.name}`, 'Undo', () => { if (!i.tags.includes(t)) i.tags.push(t); render(); }); },
   reprocess: () => process(curImg(), false),
   'del-img': el => {
     const i = S.images.find(x => x.id === (el.dataset.id || S.nav.id)), n = elsOf(i.id).length;
     confirmBox(`Delete “${esc(i.name)}”?`, `The image and its ${n} ${n === 1 ? 'element' : 'elements'} will be removed from every folder.`, 'Delete', () => {
       S.images = S.images.filter(x => x !== i); S.elements = S.elements.filter(e => e.parent !== i.id);
+      if (i.capId) { idbDel(i.capId).catch(() => {}); try { localStorage.removeItem('refbox-tags:' + i.capId); } catch (e) {} }
       if (S.nav.view !== 'grid') S.nav = {view: 'grid', folder: S.nav.folder}; render(); toast(`Deleted “${i.name}” and ${n} elements`);
     });
   },
@@ -923,9 +942,25 @@ function setTheme(t) {
 }
 let savedTheme = 'dark'; try { savedTheme = localStorage.getItem('refbox-theme') === 'light' ? 'light' : 'dark'; } catch (e) {}
 setTheme(savedTheme);
+if (EXT) {
+  document.querySelector('[data-act="simulate"]').hidden = true;
+  S.links = [];
+  chrome.storage.local.get(['enabled', 'links'], v => {
+    S.capture = v.enabled !== false; $('capture').setAttribute('aria-pressed', S.capture); $('capLbl').textContent = S.capture ? 'Capture on' : 'Capture off';
+    S.links = Array.isArray(v.links) ? v.links : []; render();
+  });
+  chrome.storage.onChanged.addListener(ch => {
+    if (ch.lastCapture) loadCaptures(false);
+    if (ch.links && JSON.stringify(ch.links.newValue) !== JSON.stringify(S.links)) { S.links = ch.links.newValue || []; render(); }
+  });
+  chrome.action && chrome.action.setBadgeText({text: ''});
+  loadCaptures(true);
+}
+/* keep tags of real captures and the links list across reloads */
+const baseRender = render;
+render = function () { baseRender(); if (EXT) { saveTags(); chrome.storage.local.set({links: S.links}); } };
 render();
 })();
 </script>
-
 </body>
 </html>

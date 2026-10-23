@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "Refbox",
+  "version": "0.1.0",
+  "description": "Catches images you save on Awwwards, Pinterest, Dribbble and Instagram and sorts them into tags and design elements.",
+  "background": { "service_worker": "background.js" },
+  "action": {
+    "default_title": "Open Refbox",
+    "default_icon": { "16": "icons/16.png", "32": "icons/32.png", "48": "icons/48.png" }
+  },
+  "icons": { "16": "icons/16.png", "32": "icons/32.png", "48": "icons/48.png", "128": "icons/128.png" },
+  "permissions": ["downloads", "contextMenus", "storage", "unlimitedStorage", "notifications"],
+  "host_permissions": [
+    "https://*.awwwards.com/*",
+    "https://*.pinterest.com/*",
+    "https://*.pinimg.com/*",
+    "https://*.dribbble.com/*",
+    "https://*.instagram.com/*",
+    "https://*.cdninstagram.com/*",
+    "https://*.fbcdn.net/*"
+  ]
+}
