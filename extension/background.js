@@ -141,11 +141,14 @@ async function screenshot(tab) {
   }
 }
 chrome.commands.onCommand.addListener((cmd, tab) => { if (cmd === 'screenshot') screenshot(tab); });
-chrome.runtime.onMessage.addListener(async msg => {
+// (not an async listener: returning a promise would answer every message with nothing)
+chrome.runtime.onMessage.addListener(msg => {
   if (!msg || msg.type !== 'aww-click') return;
-  const {awwContext = {}} = await chrome.storage.session.get('awwContext');
-  awwContext[msg.host] = {case: msg.case, at: Date.now()};
-  await chrome.storage.session.set({awwContext});
+  (async () => {
+    const {awwContext = {}} = await chrome.storage.session.get('awwContext');
+    awwContext[msg.host] = {case: msg.case, at: Date.now()};
+    await chrome.storage.session.set({awwContext});
+  })();
 });
 const enabled = async () => (await chrome.storage.local.get('enabled')).enabled !== false;
 
@@ -211,10 +214,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     capture(info.srcUrl, info.pageUrl, tab && tab.title).catch(() => chrome.notifications.create({type: 'basic', iconUrl: 'icons/128.png', title: 'Refbox could not save this image', message: 'The site did not allow the download.'}));
   }
   if (info.menuItemId === 'screenshot') return screenshot(tab);
-  if (info.menuItemId === 'save-video') {
-    if (!/^https?:/.test(info.srcUrl || '')) return log(false, host(info.pageUrl), 'This video is streamed and cannot be saved as a file. Use ⌥⇧S for a screenshot');
-    capture(info.srcUrl, info.pageUrl, tab && tab.title).catch(e => log(false, host(info.pageUrl), 'Could not save the video: ' + e.message));
-  }
+  if (info.menuItemId === 'save-video') return saveVideoIn(tab);
   const id = String(info.menuItemId);
   if (id.startsWith('folder:')) {
     const url = info.linkUrl || info.pageUrl;
@@ -237,3 +237,32 @@ async function openApp(view) {
 }
 chrome.action.onClicked.addListener(() => openApp());
 chrome.notifications.onClicked.addListener(() => openApp());
+
+// ---- videos: the page's "Save to Refbox" button, the ⌥⇧V shortcut and the right-click menu ----
+chrome.runtime.onMessage.addListener((msg, sender, reply) => {
+  if (!msg || (msg.type !== 'video-file' && msg.type !== 'video-data')) return;
+  (async () => {
+    try {
+      const site = siteOf(msg.page, msg.url || '');
+      if (msg.type === 'video-file') {
+        const blob = await fetchImage(msg.url);
+        if (!/^video\//.test(blob.type)) throw new Error('not a video file');
+        await store(blob, {url: msg.url, page: msg.page, site, name: msg.title || nameFrom(msg.url), kind: 'video'}, 'Video saved to Refbox');
+      } else {
+        const blob = await (await fetch(msg.dataUrl)).blob();
+        await store(blob, {url: '', page: msg.page, site, name: msg.title || host(msg.page), kind: 'video', recorded: true}, 'Video saved to Refbox');
+        if (msg.cut) log(true, site, 'Video saved (first 30 s, it is longer)');
+      }
+      reply({ok: true});
+    } catch (e) { reply({ok: false, error: e.message}); }
+  })();
+  return true;
+});
+async function saveVideoIn(tab) {
+  if (!tab || !/^https?:/.test(tab.url || '')) return log(false, '', 'Videos can be saved from regular web pages only');
+  try {
+    await chrome.scripting.executeScript({target: {tabId: tab.id}, files: ['video.js']});
+    await chrome.scripting.executeScript({target: {tabId: tab.id}, func: () => window.__refboxVideo && window.__refboxVideo.saveLargest()});
+  } catch (e) { log(false, host(tab.url), 'Refbox cannot reach the video on this page: ' + e.message); }
+}
+chrome.commands.onCommand.addListener((cmd, tab) => { if (cmd === 'save-video') saveVideoIn(tab); });
