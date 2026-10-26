@@ -95,6 +95,7 @@
     if (!b) return;
     const m = mediaFor(b);
     if (!m) return chrome.runtime.sendMessage({type: 'log', ok: false, site: location.hostname, text: 'Save pressed, but no image or video was found next to it'});
+    if (m.video && window.__refboxVideo) return window.__refboxVideo.save(m.video);   // video.js: file or recording
     if (m.video) {
       const src = videoSrc(m.video), poster = m.video.poster ? abs(m.video.poster) : (largest([...(m.video.closest('article, [data-test-id]') || document).querySelectorAll('img')]) || {}).src;
       return chrome.runtime.sendMessage({type: 'capture', url: /^https?:/.test(src) ? src : (poster || ''), poster, page: location.href, title: document.title});

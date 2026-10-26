@@ -657,6 +657,14 @@ document.addEventListener('change', ev => {
   if (ev.target.id === 'type-select') { const e = curEl(); e.type = ev.target.value; e.source = 'user'; render(); toast(`Moved to ${TYPES[e.type].label}`); }
   if (ev.target.id === 'file') { importFiles(ev.target.files); ev.target.value = ''; }
 });
+/* ⌘V in Refbox: a copied image or video file goes straight into the library */
+document.addEventListener('paste', ev => {
+  if (/INPUT|TEXTAREA/.test(document.activeElement.tagName)) return;
+  const files = [...(ev.clipboardData && ev.clipboardData.files || [])].filter(f => /^(image|video)\//.test(f.type));
+  if (!files.length) return;
+  ev.preventDefault(); importFiles(files);
+  toast(`Adding ${files.length} ${files.length === 1 ? 'file' : 'files'}…`);
+});
 document.addEventListener('input', ev => { if (ev.target.id === 'note-input' && S.draft) S.draft.text = ev.target.value; });
 document.addEventListener('toggle', ev => { if (ev.target.id === 'more') S.moreOpen = ev.target.open; }, true);
 document.addEventListener('submit', ev => {
